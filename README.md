@@ -446,10 +446,10 @@ Potential improvements include:
 
 ## 👩‍💻 Author
 
-**YOUR NAME**
+**Meryem Rhemimet**
 
-Aspiring Data Engineer | Interested in Data Engineering, Analytics and Data Pipelines.
+GitHub: @meryemrhemimet
 
 ---
 
-*This project was developed as a hands-on learning project to explore modern Data Engineering concepts and build an end-to-end automated data pipeline.*
+*This project is a practical learning project focused on building an end-to-end data engineering pipeline using open weather forecast data.*
