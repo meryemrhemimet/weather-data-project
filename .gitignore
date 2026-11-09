@@ -1,0 +1,14 @@
+.env
+**/.env
+.venv/
+__pycache__/
+*.py[cod]
+
+postgres/data/
+postgres_data/
+
+dbt/my_project/target/
+dbt/my_project/dbt_packages/
+dbt/my_project/logs/
+dbt/profiles/profiles.yml
+

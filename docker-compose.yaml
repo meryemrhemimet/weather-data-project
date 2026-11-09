@@ -1,0 +1,137 @@
+name: ${COMPOSE_PROJECT_NAME:-weather-data}
+
+x-superset-user: &superset-user root
+x-superset-volumes: &superset-volumes
+  - ./docker:/app/docker
+  - ./superset-core:/app/superset-core
+  - superset_data:/app/data
+  - ./local_extensions:/app/local_extensions
+  - ./docker/superset_config.py:/app/pythonpath/superset_config.py
+
+services:
+  db:
+    image: postgres:14.24
+    ports:
+      - "127.0.0.1:5000:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/airflow_init.sql:/docker-entrypoint-initdb.d/airflow_init.sql:ro
+      - ./postgres/superset_init.sql:/docker-entrypoint-initdb.d/superset_init.sql:ro
+    networks:
+      - my-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  af:
+    build:
+      context: ./airflow
+    user: "1000:0"
+    ports:
+      - "127.0.0.1:8000:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@db:5432/airflow_db
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      WEATHER_PROJECT_ROOT: ${WEATHER_PROJECT_ROOT:?Set WEATHER_PROJECT_ROOT in .env}
+      WEATHER_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:-weather-data}_my-network
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./api-request:/opt/airflow/api-requests
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "1001"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - my-network
+    command: ["bash", "-c", "airflow db migrate && airflow standalone"]
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    volumes:
+      - ./dbt/my_project:/usr/app
+      - ./dbt/profiles:/root/.dbt
+    working_dir: /usr/app
+    environment:
+      DBT_PROFILES_DIR: /root/.dbt
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      - db
+    networks:
+      - my-network
+    stdin_open: true
+    tty: true
+    command: run
+
+  superset:
+    env_file:
+      - .env
+    image: apache/superset:3.0.0-py310
+    command: ["/app/docker/docker-bootstrap.sh", "app"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SUPERSET_PORT:-8088}:8088"
+    user: *superset-user
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    volumes: *superset-volumes
+    environment:
+      SUPERSET_LOG_LEVEL: "${SUPERSET_LOG_LEVEL:-info}"
+      SUPERSET_LOAD_EXAMPLES: "false"
+    networks:
+      - my-network
+
+  superset-init:
+    image: apache/superset:3.0.0-py310
+    command: ["/app/docker/docker-init.sh"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    user: *superset-user
+    volumes: *superset-volumes
+    environment:
+      SUPERSET_FORCE_LOAD_EXAMPLES: "no"
+      SUPERSET_LOG_LEVEL: "${SUPERSET_LOG_LEVEL:-info}"
+      SUPERSET_LOAD_EXAMPLES: "false"
+    healthcheck:
+      disable: true
+    networks:
+      - my-network
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis:/data
+    networks:
+      - my-network
+
+networks:
+  my-network:
+    driver: bridge
+
+volumes:
+  redis:
+    external: false
+  superset_data:
+    external: false
